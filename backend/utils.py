@@ -196,60 +196,34 @@ def get_moex_history(
 
     raw = pd.DataFrame(all_rows, columns=columns)
 
-
-
     # Переименуем в привычные имена
-
     rename_map = {
-
         "TRADEDATE": "Date",
-
         "OPEN": "Open",
-
         "HIGH": "High",
-
         "LOW": "Low",
-
         "CLOSE": "Close",
-
         "VOLUME": "Volume",
-
         "VALUE": "Value",
-
         "NUMTRADES": "NumTrades",
-
     }
 
     for src, dst in rename_map.items():
-
         if src in raw.columns:
-
             raw[dst] = raw[src]
-
-
 
     keep = [c for c in ["Date", "Open", "High", "Low", "Close", "Volume"] if c in raw.columns]
 
     df = raw[keep].copy()
 
-
-
     # Чистка
-
     if "Date" in df.columns:
-
         df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
-
     for col in ["Open", "High", "Low", "Close", "Volume"]:
-
         if col in df.columns:
-
             df[col] = pd.to_numeric(df[col], errors="coerce")
-
     df = df.dropna(subset=["Date", "Close"]).sort_values("Date").drop_duplicates(subset=["Date"]).reset_index(drop=True)
-
-
-
+    
     df.to_csv(out_path, index=False)
 
     return df

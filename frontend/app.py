@@ -37,7 +37,7 @@ def update_graph(stock_name):
     }
 
     # # Display prediction
-    pred_text = f"Predicted Price: {prediction['prediction']['price']}"
+    pred_text = f"Predicted Price: {prediction['prediction']['price']:.2f}"
     # pred_text = ''
 
     return figure, pred_text

@@ -1,20 +1,29 @@
+import datetime
+from datetime import datetime as dtdt
+
 from fastapi import FastAPI
 from utils import get_moex_history
-from model import load_model, predict  # We'll create this next
+from model import load_model, predict, preprocess_for_tabular  # We'll create this next
 
 app = FastAPI()
 
 @app.get("/fetch_data/{stock_name}")
-def fetch_data(stock_name: str, start: str = "2020-01-01", end: str = "2023-01-01"):
+def fetch_data(stock_name: str):
     """Fetch historical data from MOEX."""
+    end = dtdt.now()
+    today = end.today()
+    start = datetime.date(today.year - 3, today.month, today.day)
+    start = f'{start::%Y-%m-%d}'
+    end = f'{end::%Y-%m-%d}'
+
     data = get_moex_history(
                 ticker=stock_name,
                 start_date=start,
                 end_date=end,
                 board="TQBR",
-                sleep_sec=1.,
+                sleep_sec=0.5,
                 force=False,
-                min_rows_cache=20,
+                min_rows_cache=200,
                 max_age_days_cache=1,
             )
     return data.to_dict()
@@ -23,5 +32,30 @@ def fetch_data(stock_name: str, start: str = "2020-01-01", end: str = "2023-01-0
 def predict_price(stock_name: str, days: int = 30):
     """Predict stock price using pretrained model."""
     model = load_model()
-    prediction = predict(model, stock_name, days)
+    
+    today_str = f'{dtdt.now():%Y-%m-%d}'
+    today = dtdt.strptime(today_str, r'%Y-%m-%d')
+    # next_day = today + datetime.timedelta(days=1)
+    month_ago = today - datetime.timedelta(days=30)
+    month_ago_str = f'{month_ago::%Y-%m-%d}'
+    
+
+    data = get_moex_history(
+                ticker=stock_name,
+                start_date=month_ago_str,
+                end_date=today_str,
+                board="TQBR",
+                sleep_sec=1.,
+                force=False,
+                min_rows_cache=20,
+                max_age_days_cache=1,
+            )
+    
+    data, features, _ = preprocess_for_tabular(data)
+
+    # print('Next day: ', next_day)
+    # print('Data index tail: ', data.index[-5:-1])
+
+    prediction = predict(model, data.loc[[data.index[-1], ], features])
+    prediction['price'] = data.loc[data.index[-2], 'Close'] * (1.0 + 0.01 * prediction['return'])
     return {"prediction": prediction}
