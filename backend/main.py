@@ -12,9 +12,9 @@ def fetch_data(stock_name: str):
     """Fetch historical data from MOEX."""
     end = dtdt.now()
     today = end.today()
-    start = datetime.date(today.year - 3, today.month, today.day)
-    start = f'{start::%Y-%m-%d}'
-    end = f'{end::%Y-%m-%d}'
+    start = datetime.date(today.year - 10, today.month, today.day)
+    start = f'{start:%Y-%m-%d}'
+    end = f'{end:%Y-%m-%d}'
 
     data = get_moex_history(
                 ticker=stock_name,
@@ -23,8 +23,6 @@ def fetch_data(stock_name: str):
                 board="TQBR",
                 sleep_sec=0.5,
                 force=False,
-                min_rows_cache=200,
-                max_age_days_cache=1,
             )
     return data.to_dict()
 
@@ -37,8 +35,7 @@ def predict_price(stock_name: str, days: int = 30):
     today = dtdt.strptime(today_str, r'%Y-%m-%d')
     # next_day = today + datetime.timedelta(days=1)
     month_ago = today - datetime.timedelta(days=30)
-    month_ago_str = f'{month_ago::%Y-%m-%d}'
-    
+    month_ago_str = f'{month_ago:%Y-%m-%d}'
 
     data = get_moex_history(
                 ticker=stock_name,
@@ -47,8 +44,6 @@ def predict_price(stock_name: str, days: int = 30):
                 board="TQBR",
                 sleep_sec=1.,
                 force=False,
-                min_rows_cache=20,
-                max_age_days_cache=1,
             )
     
     data, features, _ = preprocess_for_tabular(data)
@@ -56,6 +51,10 @@ def predict_price(stock_name: str, days: int = 30):
     # print('Next day: ', next_day)
     # print('Data index tail: ', data.index[-5:-1])
 
-    prediction = predict(model, data.loc[[data.index[-1], ], features])
+    if features is not None:
+        prediction = predict(model, data.loc[[data.index[-1], ], features])
+    else:
+        predicted_value = data['Close_Return'].mean()
+        prediction = {"return": predicted_value, "trend": "up" if predicted_value > 0. else "down"}
     prediction['price'] = data.loc[data.index[-2], 'Close'] * (1.0 + 0.01 * prediction['return'])
     return {"prediction": prediction}

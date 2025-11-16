@@ -137,8 +137,6 @@ def main() -> None:
                 board="TQBR",
                 sleep_sec=args.sleep,
                 force=args.force,
-                min_rows_cache=args.min_rows_cache,
-                max_age_days_cache=args.max_age_cache,
             )
         except Exception as exc:  # noqa: BLE001
             failures += 1

@@ -92,34 +92,19 @@ def _moex_history_page(
 
 
 # ---------- ЗАГРУЗКА И ПОДГОТОВКА ДАННЫХ ----------
-def get_moex_history(
+
+def _download_moex_range(
     ticker: str,
     start_date: str,
     end_date: str,
-    out_dir: str = "./data",
-    board: str = DEFAULT_BOARD,
+    board: str,
+    session: requests.Session,
     sleep_sec: float = 0.5,
-    force: bool = False,
-    min_rows_cache: int = 200,
-    max_age_days_cache: int = 7,
 ) -> pd.DataFrame:
     """
-    Скачивает историю торгов MOEX для тикера и сохраняет CSV: Date,Open,High,Low,Close,Volume.
-    Если файл уже есть и «свежий» — по умолчанию пропустит (кроме force=True).
+    Скачивает данные MOEX для указанного диапазона дат.
+    Возвращает очищенный DataFrame с колонками Date,Open,High,Low,Close,Volume.
     """
-    os.makedirs(out_dir, exist_ok=True)
-    out_path = os.path.join(out_dir, f"{ticker}.csv")
-
-    if not force and has_fresh_file(out_path, min_rows=min_rows_cache, max_age_days=max_age_days_cache):
-        # Уже есть пригодный файл — читаем и возвращаем
-        try:
-            return pd.read_csv(out_path, parse_dates=["Date"])
-        except Exception:
-            # если повреждён — перекачаем
-            pass
-
-    session = _requests_session()
-
     # Первая страница
     start = 0
     all_rows: List[List] = []
@@ -135,56 +120,37 @@ def get_moex_history(
         return pd.DataFrame()
 
     # cursor_data: [[TOTAL, PAGESIZE, ...]]
-
     if cursor_data:
         total = cursor_data[0][cursor_cols.index("TOTAL")] if "TOTAL" in cursor_cols else len(rows)
         page_size = cursor_data[0][cursor_cols.index("PAGESIZE")] if "PAGESIZE" in cursor_cols else len(rows)
-
     else:
         total, page_size = len(rows), len(rows)
 
     # Пагинация с ручными ретраями
-
     from tqdm import tqdm
 
-    with tqdm(total=total or 0, desc=f"MOEX {ticker}", unit="rows") as pbar:
-
+    with tqdm(total=total or 0, desc=f"MOEX {ticker} [{start_date} to {end_date}]", unit="rows") as pbar:
         while True:
-
             if rows:
-
                 all_rows.extend(rows)
-
                 pbar.update(len(rows))
 
             start += page_size
 
             if total is not None and start >= total:
-
                 break
 
             time.sleep(sleep_sec)
 
-
-
             for attempt in range(5):
-
                 try:
-
                     page = _moex_history_page(ticker, start, start_date, end_date, board, session=session)
-
                     rows = page.get("history", {}).get("data", [])
-
                     break
-
                 except requests.exceptions.RequestException as e:
-
                     wait = 1.5 * (attempt + 1)
-
                     print(f"[{ticker}] start={start} failed: {e.__class__.__name__}. retry in {wait:.1f}s...")
-
                     time.sleep(wait)
-
                     rows = []
 
             if not rows:
@@ -195,6 +161,7 @@ def get_moex_history(
         return pd.DataFrame()
 
     raw = pd.DataFrame(all_rows, columns=columns)
+    # print(f'Check 0: {len(raw)}')
 
     # Переименуем в привычные имена
     rename_map = {
@@ -213,8 +180,8 @@ def get_moex_history(
             raw[dst] = raw[src]
 
     keep = [c for c in ["Date", "Open", "High", "Low", "Close", "Volume"] if c in raw.columns]
-
     df = raw[keep].copy()
+    # print(f'Check 1: {len(df)}')
 
     # Чистка
     if "Date" in df.columns:
@@ -223,13 +190,107 @@ def get_moex_history(
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
     df = df.dropna(subset=["Date", "Close"]).sort_values("Date").drop_duplicates(subset=["Date"]).reset_index(drop=True)
-    
-    df.to_csv(out_path, index=False)
+    # print(f'Check 2: {len(df)}')
 
     return df
 
 
+def get_moex_history(
+    ticker: str,
+    start_date: str,
+    end_date: str,
+    out_dir: str = "./data",
+    board: str = DEFAULT_BOARD,
+    sleep_sec: float = 0.5,
+    force: bool = False,
+) -> pd.DataFrame:
+    """
+    Скачивает историю торгов MOEX для тикера и сохраняет CSV: Date,Open,High,Low,Close,Volume.
+    Умная логика: загружает только недостающие диапазоны дат и объединяет с существующими данными.
+    Если файл уже есть и «свежий» — по умолчанию пропустит (кроме force=True).
+    """
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, f"{ticker}.csv")
 
+    # Преобразуем даты в datetime для сравнения
+    start_dt = pd.to_datetime(start_date)
+    end_dt = pd.to_datetime(end_date)
+
+    existing_df = pd.DataFrame()
+    existing_path = out_path
+
+    # Загружаем существующие данные, если файл есть
+    if os.path.isfile(existing_path) and not force:
+        try:
+            existing_df = pd.read_csv(existing_path, parse_dates=["Date"])
+            if "Date" in existing_df.columns and len(existing_df) > 0:
+                existing_df["Date"] = pd.to_datetime(existing_df["Date"])
+                existing_df = existing_df.sort_values("Date").reset_index(drop=True)
+        except Exception:
+            # Если файл повреждён, игнорируем его
+            existing_df = pd.DataFrame()
+
+    # Определяем, какие диапазоны нужно скачать
+    ranges_to_download: List[tuple[str, str]] = []
+
+    if len(existing_df) == 0:
+        # Нет существующих данных - скачиваем весь диапазон
+        ranges_to_download.append((start_date, end_date))
+    else:
+        existing_start = existing_df["Date"].min()
+        existing_end = existing_df["Date"].max()
+
+        # Проверяем, нужно ли скачивать данные до существующего диапазона
+        if start_dt < existing_start:
+            # Скачиваем от start_date до дня перед existing_start
+            prev_day = (existing_start - timedelta(days=1)).strftime("%Y-%m-%d")
+            ranges_to_download.append((start_date, prev_day))
+
+        # Проверяем, нужно ли скачивать данные после существующего диапазона
+        if end_dt > existing_end:
+            # Скачиваем от дня после existing_end до end_date
+            next_day = (existing_end + timedelta(days=1)).strftime("%Y-%m-%d")
+            ranges_to_download.append((next_day, end_date))
+
+    # Если нечего скачивать, возвращаем существующие данные (уже отфильтрованные)
+    if not ranges_to_download:
+        # Фильтруем существующие данные по запрошенному диапазону
+        mask = (existing_df["Date"] >= start_dt) & (existing_df["Date"] <= end_dt)
+        existing_df = existing_df[mask].copy()
+        return existing_df
+
+    # Скачиваем недостающие диапазоны
+    session = _requests_session()
+    downloaded_dfs: List[pd.DataFrame] = []
+
+    for range_start, range_end in ranges_to_download:
+        print(f"[{ticker}] Downloading missing range: {range_start} to {range_end}")
+        df_range = _download_moex_range(ticker, range_start, range_end, board, session, sleep_sec)
+        if len(df_range) > 0:
+            downloaded_dfs.append(df_range)
+        print(f'Downloaded {len(df_range)} records')
+
+    # Объединяем все данные
+    all_dfs = [existing_df] + downloaded_dfs
+    all_dfs = [df for df in all_dfs if len(df) > 0]
+    # print(f'Check 0: {list(len(df) for df in all_dfs)}')
+
+    if not all_dfs:
+        # Если ничего не получилось, возвращаем пустой DataFrame
+        return pd.DataFrame()
+
+    # Объединяем и дедуплицируем
+    merged_df = pd.concat(all_dfs, ignore_index=True)
+    merged_df = merged_df.sort_values("Date").drop_duplicates(subset=["Date"]).reset_index(drop=True)
+    # Сохраняем объединённые данные
+    # print(f'Check 1: {len(merged_df)}')
+    merged_df.to_csv(out_path, index=False)
+
+    # Фильтруем по запрошенному диапазону (на случай, если скачали больше)
+    mask = (merged_df["Date"] >= start_dt) & (merged_df["Date"] <= end_dt)
+    merged_df = merged_df[mask].copy().sort_values("Date").reset_index(drop=True)
+
+    return merged_df
 
 
 def complete_data(csv_path: str, out_path: Optional[str] = None) -> pd.DataFrame:

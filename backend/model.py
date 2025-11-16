@@ -7,8 +7,11 @@ import numpy as np
 import pandas as pd
 
 
-def preprocess_for_tabular(df: pd.DataFrame):
-    assert len(df) >= 20, 'Too small data size for caluclating all the features'
+def preprocess_for_tabular(df: pd.DataFrame, min_records=20):
+    if len(df) < min_records:
+        df['Close_Return'] = df['Close'].pct_change() * 100
+        return df, None, None
+    # assert len(df) >= min_records, 'Too small data size for caluclating all the features'
 
     df = df.copy()
     

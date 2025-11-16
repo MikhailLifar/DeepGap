@@ -1,5 +1,5 @@
 import dash
-from dash import dcc, html, Input, Output
+from dash import dcc, html, Input, Output, no_update
 from dash import dash_table
 import plotly.graph_objects as go
 import requests
@@ -9,6 +9,9 @@ MATRIX_GREEN = "#39FF14"
 GOLD = "#d4af37"
 DARK_BG = "#0b0f0c"
 RED = "#ff4d4d"
+CARBON_BG = "#0e1116"
+PANEL_BG = "#0a0e12"
+GRID_LINE = "#132318"
 
 app = dash.Dash(__name__)
 
@@ -35,6 +38,11 @@ app.layout = html.Div(
     style={
         "minHeight": "100vh",
         "backgroundColor": DARK_BG,
+        "backgroundImage": (
+            "radial-gradient(1200px 600px at 20% -10%, rgba(212,175,55,0.08), transparent 60%),"
+            "radial-gradient(1000px 500px at 110% 10%, rgba(57,255,20,0.06), transparent 60%)"
+        ),
+        "backgroundAttachment": "fixed",
         "color": MATRIX_GREEN,
         "fontFamily": "Verdana, Geneva, Tahoma, sans-serif",
         "padding": "0",
@@ -47,18 +55,32 @@ app.layout = html.Div(
         html.Div(
             style={
                 "flex": "6 1 0%",
-                "padding": "12px",
-                "borderRight": f"2px solid {GOLD}",
+                "padding": "14px 12px 14px 14px",
+                "borderRight": f"1px solid rgba(212,175,55,0.2)",
                 "boxSizing": "border-box",
+                "backgroundColor": "transparent",
             },
             children=[
                 html.H2(
                     "Time Series (Japanese Candles)",
-                    style={"color": GOLD, "margin": "8px 0 12px 0"},
+                    style={
+                        "color": GOLD,
+                        "margin": "8px 0 12px 0",
+                        "letterSpacing": "0.5px",
+                        "fontWeight": "600",
+                    },
                 ),
                 dcc.Graph(
                     id="candles-graph",
-                    style={"height": "calc(100vh - 80px)"},
+                    style={
+                        "height": "calc(100vh - 88px)",
+                        "backgroundColor": PANEL_BG,
+                        "borderRadius": "10px",
+                        "boxShadow": (
+                            "inset 0 0 0 1px rgba(212,175,55,0.16), "
+                            "0 0 24px rgba(212,175,55,0.06)"
+                        ),
+                    },
                     config={"displayModeBar": False},
                 ),
             ],
@@ -70,29 +92,47 @@ app.layout = html.Div(
                 "display": "flex",
                 "flexDirection": "column",
                 "boxSizing": "border-box",
+                "padding": "14px 14px 14px 12px",
             },
             children=[
                 html.Div(
                     style={
                         "height": "25vh",
-                        "padding": "12px",
+                        "padding": "14px",
                         "boxSizing": "border-box",
-                        "borderBottom": f"2px solid {GOLD}",
+                        "borderBottom": f"1px solid rgba(212,175,55,0.2)",
                         "display": "flex",
                         "flexDirection": "column",
                         "gap": "12px",
                         "justifyContent": "flex-start",
+                        "backgroundColor": PANEL_BG,
+                        "borderRadius": "10px",
+                        "boxShadow": (
+                            "inset 0 0 0 1px rgba(212,175,55,0.16), "
+                            "0 0 20px rgba(57,255,20,0.05)"
+                        ),
                     },
                     children=[
-                        html.H2("Select Ticker", style={"color": GOLD, "margin": "8px 0 0 0"}),
+                        html.H2(
+                            "Select Ticker",
+                            style={
+                                "color": GOLD,
+                                "margin": "4px 0 0 0",
+                                "letterSpacing": "0.4px",
+                                "fontWeight": "600",
+                            },
+                        ),
                         dcc.Dropdown(
                             id="stock-dropdown",
                             options=[{"label": f"{TICKER_TO_NAME.get(t, t)} ({t})", "value": t} for t in POPULAR_TICKERS],
                             value="SBER",
                             style={
-                                "backgroundColor": DARK_BG,
+                                "backgroundColor": CARBON_BG,
                                 "color": MATRIX_GREEN,
-                                "border": f"1px solid {GOLD}",
+                                "border": f"1px solid rgba(212,175,55,0.3)",
+                                "borderRadius": "10px",
+                                "height": "44px",
+                                "boxShadow": "0 0 0 0 rgba(212,175,55,0)",
                             },
                         ),
                         html.Div(
@@ -101,6 +141,7 @@ app.layout = html.Div(
                                 "marginTop": "12px",
                                 "color": MATRIX_GREEN,
                                 "fontSize": "16px",
+                                "opacity": 0.9,
                             },
                         ),
                     ],
@@ -108,13 +149,24 @@ app.layout = html.Div(
                 html.Div(
                     style={
                         "height": "calc(100vh - 25vh)",
-                        "padding": "12px",
+                        "padding": "14px",
                         "boxSizing": "border-box",
+                        "backgroundColor": PANEL_BG,
+                        "borderRadius": "10px",
+                        "boxShadow": (
+                            "inset 0 0 0 1px rgba(212,175,55,0.16), "
+                            "0 0 20px rgba(57,255,20,0.05)"
+                        ),
                     },
                     children=[
                         html.H2(
                             "Today & Forecast",
-                            style={"color": GOLD, "margin": "0 0 8px 0"},
+                            style={
+                                "color": GOLD,
+                                "margin": "0 0 10px 0",
+                                "letterSpacing": "0.4px",
+                                "fontWeight": "600",
+                            },
                         ),
                         dash_table.DataTable(
                             id="metrics-table",
@@ -126,20 +178,38 @@ app.layout = html.Div(
                                 {"name": "Forecasted Return", "id": "forecast_return", "type": "numeric", "format": {"specifier": ".2%"}},
                             ],
                             data=[],
-                            style_table={"overflowX": "auto"},
+                            style_table={
+                                "overflowX": "auto",
+                                "backgroundColor": "transparent",
+                                "borderRadius": "8px",
+                            },
                             style_header={
-                                "backgroundColor": DARK_BG,
+                                "backgroundColor": CARBON_BG,
                                 "color": GOLD,
-                                "border": f"1px solid {GOLD}",
+                                "border": f"1px solid rgba(212,175,55,0.2)",
+                                "borderBottom": f"1px solid rgba(212,175,55,0.3)",
+                                "fontWeight": "600",
                             },
                             style_cell={
-                                "backgroundColor": DARK_BG,
+                                "backgroundColor": CARBON_BG,
                                 "color": MATRIX_GREEN,
-                                "border": f"1px solid {GOLD}",
+                                "border": f"1px solid rgba(212,175,55,0.08)",
                                 "textAlign": "center",
                                 "fontFamily": "Verdana, Geneva, Tahoma, sans-serif",
+                                "fontSize": "14px",
+                                "padding": "10px 8px",
+                                "whiteSpace": "nowrap",
                             },
                             style_data_conditional=[
+                                {
+                                    "if": {"row_index": "odd"},
+                                    "backgroundColor": "#0d1218",
+                                },
+                                {
+                                    "if": {"state": "active"},
+                                    "backgroundColor": "#101826",
+                                    "border": f"1px solid rgba(212,175,55,0.2)",
+                                },
                                 {
                                     "if": {"filter_query": "{today_return} > 0", "column_id": "today_return"},
                                     "color": MATRIX_GREEN,
@@ -157,6 +227,7 @@ app.layout = html.Div(
                                     "color": RED,
                                 },
                             ],
+                            style_as_list_view=True,
                         ),
                     ],
                 ),
@@ -322,6 +393,20 @@ def _build_table_rows_from_cache():
 )
 def update_views(stock_name):
     # Fetch data and prediction
+    table_data = _build_table_rows_from_cache()
+
+    if not stock_name:
+        empty_fig = go.Figure()
+        empty_fig.update_layout(
+            title="Select a ticker to view data",
+            paper_bgcolor=PANEL_BG,
+            plot_bgcolor=PANEL_BG,
+            font=dict(color=MATRIX_GREEN),
+            xaxis_showgrid=False,
+            yaxis_showgrid=False,
+        )
+        return empty_fig, "", table_data
+
     df_like = requests.get(f"http://localhost:8000/fetch_data/{stock_name}").json()
     pred_resp = requests.post(f"http://localhost:8000/predict/{stock_name}").json()
 
@@ -342,8 +427,6 @@ def update_views(stock_name):
         forecast_price = prediction_obj.get("price")
 
     pred_text = ""
-    # Table should show 10 popular stocks (from cache)
-    table_data = _build_table_rows_from_cache()
     if close_key and forecast_price is not None:
         metrics = _compute_returns(df_like[close_key], forecast_price)
         if metrics:
