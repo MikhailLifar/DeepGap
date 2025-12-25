@@ -2,3 +2,6 @@ fastapi
 uvicorn
 pandas-datareader
 joblib
+torch
+numpy
+pandas

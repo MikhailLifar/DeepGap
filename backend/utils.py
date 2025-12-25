@@ -6,6 +6,7 @@ import os
 import time
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict
+from pathlib import Path
 
 import pandas as pd
 
@@ -17,6 +18,10 @@ from urllib3.util.retry import Retry
 MOEX_BASE = "https://iss.moex.com/iss"
 # Ликвидные акции торгуются на TQBR (режим T+)
 DEFAULT_BOARD = "TQBR"
+
+# Get the directory where this script is located
+_BACKEND_DIR = Path(__file__).parent.resolve()
+_DEFAULT_DATA_DIR = _BACKEND_DIR / "data"
 
 
 
@@ -199,7 +204,7 @@ def get_moex_history(
     ticker: str,
     start_date: str,
     end_date: str,
-    out_dir: str = "./data",
+    out_dir: Optional[str] = None,
     board: str = DEFAULT_BOARD,
     sleep_sec: float = 0.5,
     force: bool = False,
@@ -208,7 +213,28 @@ def get_moex_history(
     Скачивает историю торгов MOEX для тикера и сохраняет CSV: Date,Open,High,Low,Close,Volume.
     Умная логика: загружает только недостающие диапазоны дат и объединяет с существующими данными.
     Если файл уже есть и «свежий» — по умолчанию пропустит (кроме force=True).
+    
+    Args:
+        ticker: Stock ticker symbol
+        start_date: Start date (YYYY-MM-DD)
+        end_date: End date (YYYY-MM-DD)
+        out_dir: Output directory for CSV files (default: backend/data, absolute path)
+        board: MOEX board name (default: TQBR)
+        sleep_sec: Sleep time between requests
+        force: Force refresh even if file exists
     """
+    # Use absolute path by default to avoid working directory issues
+    if out_dir is None:
+        out_dir = str(_DEFAULT_DATA_DIR)
+    else:
+        # Convert relative paths to absolute paths
+        out_dir_path = Path(out_dir)
+        if not out_dir_path.is_absolute():
+            # If relative, make it relative to the backend directory
+            out_dir = str(_BACKEND_DIR / out_dir)
+        else:
+            out_dir = str(out_dir_path)
+    
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, f"{ticker}.csv")
 

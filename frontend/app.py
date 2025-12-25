@@ -54,7 +54,7 @@ app.layout = html.Div(
         # LEFT: Candlestick chart (fills height)
         html.Div(
             style={
-                "flex": "6 1 0%",
+                "flex": "2 1 0%",
                 "padding": "14px 12px 14px 14px",
                 "borderRight": f"1px solid rgba(212,175,55,0.2)",
                 "boxSizing": "border-box",
@@ -88,7 +88,7 @@ app.layout = html.Div(
         # RIGHT: Top (25%) dropdown, Bottom (75%) table
         html.Div(
             style={
-                "flex": "4 1 0%",
+                "flex": "1 1 0%",
                 "display": "flex",
                 "flexDirection": "column",
                 "boxSizing": "border-box",
@@ -160,7 +160,7 @@ app.layout = html.Div(
                     },
                     children=[
                         html.H2(
-                            "Today & Forecast",
+                            "Current & Predicted Monthly",
                             style={
                                 "color": GOLD,
                                 "margin": "0 0 10px 0",
@@ -172,10 +172,11 @@ app.layout = html.Div(
                             id="metrics-table",
                             columns=[
                                 {"name": "Ticker", "id": "ticker"},
-                                {"name": "Today Price", "id": "today_price", "type": "numeric", "format": {"specifier": ".2f"}},
-                                {"name": "Today Return", "id": "today_return", "type": "numeric", "format": {"specifier": ".2%"}},
-                                {"name": "Forecasted Price", "id": "forecast_price", "type": "numeric", "format": {"specifier": ".2f"}},
-                                {"name": "Forecasted Return", "id": "forecast_return", "type": "numeric", "format": {"specifier": ".2%"}},
+                                {"name": "Current Month Price", "id": "today_price", "type": "numeric", "format": {"specifier": ".3f"}},
+                                {"name": "Current Month Return", "id": "today_return", "type": "numeric", "format": {"specifier": ".3%"}},
+                                {"name": "Predicted Monthly Price", "id": "forecast_price", "type": "numeric", "format": {"specifier": ".3f"}},
+                                {"name": "Predicted Monthly Return", "id": "forecast_return", "type": "numeric", "format": {"specifier": ".3%"}},
+                                {"name": "Recommendation", "id": "recommendation"},
                             ],
                             data=[],
                             style_table={
@@ -189,6 +190,11 @@ app.layout = html.Div(
                                 "border": f"1px solid rgba(212,175,55,0.2)",
                                 "borderBottom": f"1px solid rgba(212,175,55,0.3)",
                                 "fontWeight": "600",
+                                "whiteSpace": "normal",
+                                "height": "auto",
+                                "lineHeight": "1.2",
+                                "textAlign": "center",
+                                "padding": "8px 4px",
                             },
                             style_cell={
                                 "backgroundColor": CARBON_BG,
@@ -196,10 +202,36 @@ app.layout = html.Div(
                                 "border": f"1px solid rgba(212,175,55,0.08)",
                                 "textAlign": "center",
                                 "fontFamily": "Verdana, Geneva, Tahoma, sans-serif",
-                                "fontSize": "14px",
-                                "padding": "10px 8px",
-                                "whiteSpace": "nowrap",
+                                "fontSize": "13px",
+                                "padding": "8px 4px",
+                                "whiteSpace": "normal",
                             },
+                            style_header_conditional=[
+                                {
+                                    "if": {"column_id": "ticker"},
+                                    "width": "15%",
+                                },
+                                {
+                                    "if": {"column_id": "today_price"},
+                                    "width": "17%",
+                                },
+                                {
+                                    "if": {"column_id": "today_return"},
+                                    "width": "17%",
+                                },
+                                {
+                                    "if": {"column_id": "forecast_price"},
+                                    "width": "17%",
+                                },
+                                {
+                                    "if": {"column_id": "forecast_return"},
+                                    "width": "17%",
+                                },
+                                {
+                                    "if": {"column_id": "recommendation"},
+                                    "width": "17%",
+                                },
+                            ],
                             style_data_conditional=[
                                 {
                                     "if": {"row_index": "odd"},
@@ -225,6 +257,21 @@ app.layout = html.Div(
                                 {
                                     "if": {"filter_query": "{forecast_return} <= 0", "column_id": "forecast_return"},
                                     "color": RED,
+                                },
+                                {
+                                    "if": {"filter_query": "{recommendation} = buy", "column_id": "recommendation"},
+                                    "color": MATRIX_GREEN,
+                                    "fontWeight": "600",
+                                },
+                                {
+                                    "if": {"filter_query": "{recommendation} = sell", "column_id": "recommendation"},
+                                    "color": RED,
+                                    "fontWeight": "600",
+                                },
+                                {
+                                    "if": {"filter_query": "{recommendation} = keep", "column_id": "recommendation"},
+                                    "color": GOLD,
+                                    "fontWeight": "600",
                                 },
                             ],
                             style_as_list_view=True,
@@ -353,16 +400,40 @@ def _compute_returns(close_series_dict, forecast_price):
     return last, today_ret, forecast_ret
 
 
+def _get_recommendation(predicted_return: float) -> str:
+    """
+    Get recommendation based on predicted monthly return.
+    
+    Args:
+        predicted_return: Predicted monthly return as a decimal (e.g., 0.05 for 5%)
+    
+    Returns:
+        'buy', 'keep', or 'sell'
+    """
+    # Convert to percentage for threshold comparison
+    return_pct = predicted_return * 100
+    
+    if return_pct > 2.0:
+        return "buy"
+    elif return_pct < -2.0:
+        return "sell"
+    else:
+        return "keep"
+
+
 def _build_table_rows_from_cache():
     rows = []
     for t in POPULAR_TICKERS:
         cached = STOCK_CACHE.get(t) or {}
         df_like = cached.get("data") or {}
         pred = cached.get("pred") or {}
-        # extract forecast price
+        # extract forecast price and return
         pred_price = None
+        pred_return = None
         if isinstance(pred, dict):
-            pred_price = (pred.get("prediction") or {}).get("price")
+            prediction_obj = pred.get("prediction") or {}
+            pred_price = prediction_obj.get("price")
+            pred_return = prediction_obj.get("return")  # Monthly return in percentage
         # extract close series
         close_key = None
         for ck in ("Close", "CLOSE", "close"):
@@ -373,12 +444,18 @@ def _build_table_rows_from_cache():
             metrics = _compute_returns(df_like[close_key], pred_price)
             if metrics:
                 today_price, today_return, forecast_return = metrics
+                # Use predicted return from API if available, otherwise use calculated forecast_return
+                if pred_return is not None:
+                    # pred_return is in percentage (e.g., 1.5 for 1.5%), convert to decimal
+                    forecast_return = pred_return / 100.0
+                recommendation = _get_recommendation(forecast_return)
                 rows.append({
                     "ticker": f"{TICKER_TO_NAME.get(t, t)} ({t})",
                     "today_price": float(today_price),
                     "today_return": float(today_return),
                     "forecast_price": float(pred_price),
                     "forecast_return": float(forecast_return),
+                    "recommendation": recommendation.upper(),
                 })
     return rows
 
@@ -390,6 +467,7 @@ def _build_table_rows_from_cache():
         Output("metrics-table", "data"),
     ],
     [Input("stock-dropdown", "value")],
+    # Allow initial call to show data on page load
 )
 def update_views(stock_name):
     # Fetch data and prediction
@@ -407,8 +485,29 @@ def update_views(stock_name):
         )
         return empty_fig, "", table_data
 
-    df_like = requests.get(f"http://localhost:8000/fetch_data/{stock_name}").json()
-    pred_resp = requests.post(f"http://localhost:8000/predict/{stock_name}").json()
+    # Use cache if available, otherwise fetch
+    cached = STOCK_CACHE.get(stock_name)
+    if cached:
+        df_like = cached.get("data")
+        pred_resp = cached.get("pred")
+    else:
+        # Fetch if not in cache
+        try:
+            df_like = requests.get(f"http://localhost:8000/fetch_data/{stock_name}", timeout=10).json()
+            pred_resp = requests.post(f"http://localhost:8000/predict/{stock_name}", timeout=30).json()
+            # Update cache for future use
+            STOCK_CACHE[stock_name] = {"data": df_like, "pred": pred_resp}
+        except Exception as e:
+            print(f"Error fetching data for {stock_name}: {e}")
+            # Return empty figure on error
+            empty_fig = go.Figure()
+            empty_fig.update_layout(
+                title=f"Error loading {stock_name}",
+                paper_bgcolor=PANEL_BG,
+                plot_bgcolor=PANEL_BG,
+                font=dict(color=MATRIX_GREEN),
+            )
+            return empty_fig, f"Error loading data: {str(e)}", table_data
 
     # Build candlestick or fallback line
     figure = _build_candlestick_figure(df_like, stock_name)
@@ -421,34 +520,76 @@ def update_views(stock_name):
             break
 
     forecast_price = None
-    # Expected structure: {'prediction': {'price': ...}}
+    pred_return = None
+    # Expected structure: {'prediction': {'price': ..., 'return': ...}}
     if isinstance(pred_resp, dict):
         prediction_obj = pred_resp.get("prediction") or {}
         forecast_price = prediction_obj.get("price")
+        pred_return = prediction_obj.get("return")  # Monthly return in percentage
 
     pred_text = ""
     if close_key and forecast_price is not None:
         metrics = _compute_returns(df_like[close_key], forecast_price)
         if metrics:
             today_price, today_return, forecast_return = metrics
-            pred_text = f"Predicted Price: {float(forecast_price):.2f}"
+            # Use predicted return from API if available, otherwise use calculated forecast_return
+            if pred_return is not None:
+                # pred_return is in percentage (e.g., 1.5 for 1.5%), convert to decimal
+                forecast_return = pred_return / 100.0
+            recommendation = _get_recommendation(forecast_return)
+            recommendation_color = MATRIX_GREEN if recommendation == "buy" else (RED if recommendation == "sell" else GOLD)
+            pred_text = html.Div([
+                html.Div(
+                    f"Current Monthly Price: {float(today_price):.3f}",
+                    style={
+                        "marginBottom": "8px",
+                        "color": GOLD,
+                        "fontSize": "16px",
+                        "fontWeight": "600",
+                    }
+                ),
+                html.Div(
+                    f"Predicted Monthly Price: {float(forecast_price):.3f}",
+                    style={
+                        "marginBottom": "8px",
+                        "color": MATRIX_GREEN,
+                        "fontSize": "16px",
+                    }
+                ),
+                html.Div(
+                    f"Recommendation: {recommendation.upper()}",
+                    style={
+                        "color": recommendation_color,
+                        "fontSize": "16px",
+                        "fontWeight": "600",
+                    }
+                ),
+            ])
 
     return figure, pred_text, table_data
 
 
 def preload_cache():
-    # Preload latest data and predictions for popular tickers
-    for t in POPULAR_TICKERS:
+    """Preload cache - load all 10 popular tickers synchronously so table is populated on startup."""
+    print(f"Preloading {len(POPULAR_TICKERS)} popular tickers for table...")
+    
+    # Load all popular tickers synchronously so table has data on page load
+    for i, ticker in enumerate(POPULAR_TICKERS, 1):
         try:
-            data = requests.get(f"http://localhost:8000/fetch_data/{t}", timeout=30).json()
-            pred = requests.post(f"http://localhost:8000/predict/{t}", timeout=30).json()
-            STOCK_CACHE[t] = {"data": data, "pred": pred}
-        except Exception:
-            # Leave missing tickers out silently
-            pass
+            print(f"[{i}/{len(POPULAR_TICKERS)}] Preloading {ticker}...")
+            data = requests.get(f"http://localhost:8000/fetch_data/{ticker}", timeout=10).json()
+            pred = requests.post(f"http://localhost:8000/predict/{ticker}", timeout=30).json()
+            STOCK_CACHE[ticker] = {"data": data, "pred": pred}
+            print(f"✓ Preloaded {ticker}")
+        except Exception as e:
+            print(f"✗ Failed to preload {ticker}: {e}")
+    
+    print(f"✓ Preloaded {len(STOCK_CACHE)} tickers. Table will be populated on startup.")
 
 
 if __name__ == "__main__":
-    # Preload data for table before starting server
+    # Preload default ticker before starting server
+    # This ensures data is ready when callback fires on page load
     preload_cache()
+    print("Starting Dash server...")
     app.run(debug=True, host="0.0.0.0", port=8050)
