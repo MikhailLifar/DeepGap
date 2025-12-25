@@ -70,18 +70,23 @@ app.layout = html.Div(
                         "fontWeight": "600",
                     },
                 ),
-                dcc.Graph(
-                    id="candles-graph",
-                    style={
-                        "height": "calc(100vh - 88px)",
-                        "backgroundColor": PANEL_BG,
-                        "borderRadius": "10px",
-                        "boxShadow": (
-                            "inset 0 0 0 1px rgba(212,175,55,0.16), "
-                            "0 0 24px rgba(212,175,55,0.06)"
-                        ),
-                    },
-                    config={"displayModeBar": False},
+                dcc.Loading(
+                    id="graph-loading",
+                    type="default",
+                    children=dcc.Graph(
+                        id="candles-graph",
+                        style={
+                            "height": "calc(100vh - 88px)",
+                            "backgroundColor": PANEL_BG,
+                            "borderRadius": "10px",
+                            "boxShadow": (
+                                "inset 0 0 0 1px rgba(212,175,55,0.16), "
+                                "0 0 24px rgba(212,175,55,0.06)"
+                            ),
+                        },
+                        config={"displayModeBar": False},
+                    ),
+                    color=GOLD,
                 ),
             ],
         ),
@@ -114,7 +119,7 @@ app.layout = html.Div(
                     },
                     children=[
                         html.H2(
-                            "Select Ticker",
+                            "Search Ticker",
                             style={
                                 "color": GOLD,
                                 "margin": "4px 0 0 0",
@@ -122,18 +127,49 @@ app.layout = html.Div(
                                 "fontWeight": "600",
                             },
                         ),
-                        dcc.Dropdown(
-                            id="stock-dropdown",
-                            options=[{"label": f"{TICKER_TO_NAME.get(t, t)} ({t})", "value": t} for t in POPULAR_TICKERS],
-                            value="SBER",
+                        html.Div(
+                            children=[
+                                dcc.Input(
+                                    id="stock-search",
+                                    type="text",
+                                    value="SBER",
+                                    placeholder="Enter ticker symbol (e.g., SBER, GAZP, LKOH...)",
+                                    debounce=True,
+                                    style={
+                                        "width": "100%",
+                                        "height": "44px",
+                                        "backgroundColor": CARBON_BG,
+                                        "color": MATRIX_GREEN,
+                                        "border": f"1px solid rgba(212,175,55,0.3)",
+                                        "borderRadius": "10px",
+                                        "padding": "10px 12px",
+                                        "fontSize": "14px",
+                                        "fontFamily": "Verdana, Geneva, Tahoma, sans-serif",
+                                        "boxShadow": "0 0 0 0 rgba(212,175,55,0)",
+                                    },
+                                ),
+                                html.Div(
+                                    "Popular: " + ", ".join([f"{TICKER_TO_NAME.get(t, t)} ({t})" for t in POPULAR_TICKERS[:5]]),
+                                    style={
+                                        "marginTop": "6px",
+                                        "fontSize": "11px",
+                                        "color": "rgba(212,175,55,0.6)",
+                                        "fontStyle": "italic",
+                                    },
+                                ),
+                            ],
+                        ),
+                        html.Div(
+                            id="loading-indicator",
                             style={
-                                "backgroundColor": CARBON_BG,
-                                "color": MATRIX_GREEN,
-                                "border": f"1px solid rgba(212,175,55,0.3)",
-                                "borderRadius": "10px",
-                                "height": "44px",
-                                "boxShadow": "0 0 0 0 rgba(212,175,55,0)",
+                                "marginTop": "8px",
+                                "color": GOLD,
+                                "fontSize": "14px",
+                                "display": "none",
                             },
+                            children=[
+                                html.Div("⏳ Loading data from MOEX... This may take some time.", style={"color": GOLD}),
+                            ],
                         ),
                         html.Div(
                             id="prediction-output",
@@ -421,10 +457,34 @@ def _get_recommendation(predicted_return: float) -> str:
         return "keep"
 
 
-def _build_table_rows_from_cache():
+def _build_table_rows_from_cache(force_reload=False):
+    """Build table rows from cache, fetching from backend only if needed.
+    
+    Args:
+        force_reload: If True, fetch from backend even if in local cache.
+                     If False, only use local cache (backend handles initial loading).
+    """
     rows = []
     for t in POPULAR_TICKERS:
-        cached = STOCK_CACHE.get(t) or {}
+        # Check local cache first
+        cached = STOCK_CACHE.get(t)
+        if not cached or force_reload:
+            # If not in local cache, fetch from backend (which uses its own cache)
+            try:
+                data = requests.get(f"http://localhost:8000/fetch_data/{t}", timeout=10).json()
+                pred = requests.post(f"http://localhost:8000/predict/{t}", timeout=30).json()
+                # Update local cache for future use
+                STOCK_CACHE[t] = {"data": data, "pred": pred}
+                cached = STOCK_CACHE.get(t)
+            except Exception as e:
+                # If backend hasn't finished loading yet, skip for now
+                # Table will update once backend is ready
+                print(f"Error fetching {t} for table (backend may still be loading): {e}")
+                continue
+        
+        if not cached:
+            continue
+            
         df_like = cached.get("data") or {}
         pred = cached.get("pred") or {}
         # extract forecast price and return
@@ -465,49 +525,191 @@ def _build_table_rows_from_cache():
         Output("candles-graph", "figure"),
         Output("prediction-output", "children"),
         Output("metrics-table", "data"),
+        Output("loading-indicator", "style"),
     ],
-    [Input("stock-dropdown", "value")],
+    [Input("stock-search", "value")],
     # Allow initial call to show data on page load
 )
 def update_views(stock_name):
-    # Fetch data and prediction
-    table_data = _build_table_rows_from_cache()
+    # Only build table from cache (don't force reload - backend handles initial loading)
+    # This prevents redundant requests on every input change
+    table_data = _build_table_rows_from_cache(force_reload=False)
 
     if not stock_name:
         empty_fig = go.Figure()
         empty_fig.update_layout(
-            title="Select a ticker to view data",
+            title="Enter a ticker symbol to view data",
             paper_bgcolor=PANEL_BG,
             plot_bgcolor=PANEL_BG,
             font=dict(color=MATRIX_GREEN),
             xaxis_showgrid=False,
             yaxis_showgrid=False,
         )
-        return empty_fig, "", table_data
+        return empty_fig, "", table_data, {"marginTop": "8px", "display": "none"}
+
+    # Normalize ticker (uppercase, strip whitespace)
+    stock_name = stock_name.upper().strip()
 
     # Use cache if available, otherwise fetch
     cached = STOCK_CACHE.get(stock_name)
+    loading_style = {"marginTop": "8px", "display": "none"}
+    
     if cached:
         df_like = cached.get("data")
         pred_resp = cached.get("pred")
     else:
-        # Fetch if not in cache
+        # Fetch if not in cache - show loading indicator
+        loading_style = {"marginTop": "8px", "display": "block"}
         try:
-            df_like = requests.get(f"http://localhost:8000/fetch_data/{stock_name}", timeout=10).json()
-            pred_resp = requests.post(f"http://localhost:8000/predict/{stock_name}", timeout=30).json()
+            response = requests.get(f"http://localhost:8000/fetch_data/{stock_name}", timeout=60)
+            # Check for HTTP errors
+            if response.status_code == 404:
+                error_detail = response.json().get("detail", f"Ticker '{stock_name}' not found")
+                empty_fig = go.Figure()
+                empty_fig.add_annotation(
+                    xref="paper", yref="paper",
+                    x=0.5, y=0.5,
+                    text=f"Ticker '{stock_name}' not found<br>Please check the ticker symbol",
+                    showarrow=False,
+                    font=dict(size=16, color=RED),
+                    bgcolor="rgba(0, 0, 0, 0.8)",
+                    bordercolor=RED,
+                    borderwidth=2,
+                    borderpad=15,
+                    align="center",
+                )
+                empty_fig.update_layout(
+                    title=f"Ticker '{stock_name}' not found",
+                    paper_bgcolor=PANEL_BG,
+                    plot_bgcolor=PANEL_BG,
+                    font=dict(color=MATRIX_GREEN),
+                    xaxis_showgrid=False,
+                    yaxis_showgrid=False,
+                )
+                loading_style = {"marginTop": "8px", "display": "none"}
+                error_msg = html.Div(
+                    f"Error: {error_detail}",
+                    style={
+                        "color": RED,
+                        "fontSize": "14px",
+                        "marginTop": "8px",
+                    }
+                )
+                return empty_fig, error_msg, table_data, loading_style
+            response.raise_for_status()  # Raise exception for other HTTP errors
+            df_like = response.json()
+            
+            # Check if data is empty (shouldn't happen with proper backend handling, but check anyway)
+            if not df_like or (isinstance(df_like, dict) and not any(df_like.values())):
+                empty_fig = go.Figure()
+                empty_fig.add_annotation(
+                    xref="paper", yref="paper",
+                    x=0.5, y=0.5,
+                    text=f"No data available for ticker '{stock_name}'",
+                    showarrow=False,
+                    font=dict(size=16, color=RED),
+                    bgcolor="rgba(0, 0, 0, 0.8)",
+                    bordercolor=RED,
+                    borderwidth=2,
+                    borderpad=15,
+                    align="center",
+                )
+                empty_fig.update_layout(
+                    title=f"No data for '{stock_name}'",
+                    paper_bgcolor=PANEL_BG,
+                    plot_bgcolor=PANEL_BG,
+                    font=dict(color=MATRIX_GREEN),
+                    xaxis_showgrid=False,
+                    yaxis_showgrid=False,
+                )
+                loading_style = {"marginTop": "8px", "display": "none"}
+                error_msg = html.Div(
+                    f"No data available for ticker '{stock_name}'. Please check the ticker symbol.",
+                    style={
+                        "color": RED,
+                        "fontSize": "14px",
+                        "marginTop": "8px",
+                    }
+                )
+                return empty_fig, error_msg, table_data, loading_style
+            
+            # Try to get prediction, but don't fail if it doesn't work for non-existent tickers
+            try:
+                pred_resp = requests.post(f"http://localhost:8000/predict/{stock_name}", timeout=90).json()
+            except Exception:
+                # If prediction fails, that's okay - we'll just show data without prediction
+                pred_resp = None
+            
             # Update cache for future use
             STOCK_CACHE[stock_name] = {"data": df_like, "pred": pred_resp}
-        except Exception as e:
-            print(f"Error fetching data for {stock_name}: {e}")
-            # Return empty figure on error
+            loading_style = {"marginTop": "8px", "display": "none"}
+        except requests.exceptions.HTTPError as e:
+            print(f"HTTP error fetching data for {stock_name}: {e}")
             empty_fig = go.Figure()
+            empty_fig.add_annotation(
+                xref="paper", yref="paper",
+                x=0.5, y=0.5,
+                text=f"Error loading '{stock_name}'<br>Please check the ticker symbol",
+                showarrow=False,
+                font=dict(size=16, color=RED),
+                bgcolor="rgba(0, 0, 0, 0.8)",
+                bordercolor=RED,
+                borderwidth=2,
+                borderpad=15,
+                align="center",
+            )
             empty_fig.update_layout(
                 title=f"Error loading {stock_name}",
                 paper_bgcolor=PANEL_BG,
                 plot_bgcolor=PANEL_BG,
                 font=dict(color=MATRIX_GREEN),
+                xaxis_showgrid=False,
+                yaxis_showgrid=False,
             )
-            return empty_fig, f"Error loading data: {str(e)}", table_data
+            loading_style = {"marginTop": "8px", "display": "none"}
+            error_msg = html.Div(
+                f"Error: Could not load data for ticker '{stock_name}'. Please verify the ticker symbol is correct.",
+                style={
+                    "color": RED,
+                    "fontSize": "14px",
+                    "marginTop": "8px",
+                }
+            )
+            return empty_fig, error_msg, table_data, loading_style
+        except Exception as e:
+            print(f"Error fetching data for {stock_name}: {e}")
+            # Return empty figure on error
+            empty_fig = go.Figure()
+            empty_fig.add_annotation(
+                xref="paper", yref="paper",
+                x=0.5, y=0.5,
+                text=f"Error loading '{stock_name}'<br>{str(e)[:100]}",
+                showarrow=False,
+                font=dict(size=16, color=RED),
+                bgcolor="rgba(0, 0, 0, 0.8)",
+                bordercolor=RED,
+                borderwidth=2,
+                borderpad=15,
+                align="center",
+            )
+            empty_fig.update_layout(
+                title=f"Error loading {stock_name}",
+                paper_bgcolor=PANEL_BG,
+                plot_bgcolor=PANEL_BG,
+                font=dict(color=MATRIX_GREEN),
+                xaxis_showgrid=False,
+                yaxis_showgrid=False,
+            )
+            loading_style = {"marginTop": "8px", "display": "none"}
+            error_msg = html.Div(
+                f"Error loading data: {str(e)}",
+                style={
+                    "color": RED,
+                    "fontSize": "14px",
+                    "marginTop": "8px",
+                }
+            )
+            return empty_fig, error_msg, table_data, loading_style
 
     # Build candlestick or fallback line
     figure = _build_candlestick_figure(df_like, stock_name)
@@ -522,7 +724,7 @@ def update_views(stock_name):
     forecast_price = None
     pred_return = None
     # Expected structure: {'prediction': {'price': ..., 'return': ...}}
-    if isinstance(pred_resp, dict):
+    if pred_resp and isinstance(pred_resp, dict):
         prediction_obj = pred_resp.get("prediction") or {}
         forecast_price = prediction_obj.get("price")
         pred_return = prediction_obj.get("return")  # Monthly return in percentage
@@ -566,30 +768,11 @@ def update_views(stock_name):
                 ),
             ])
 
-    return figure, pred_text, table_data
-
-
-def preload_cache():
-    """Preload cache - load all 10 popular tickers synchronously so table is populated on startup."""
-    print(f"Preloading {len(POPULAR_TICKERS)} popular tickers for table...")
-    
-    # Load all popular tickers synchronously so table has data on page load
-    for i, ticker in enumerate(POPULAR_TICKERS, 1):
-        try:
-            print(f"[{i}/{len(POPULAR_TICKERS)}] Preloading {ticker}...")
-            data = requests.get(f"http://localhost:8000/fetch_data/{ticker}", timeout=10).json()
-            pred = requests.post(f"http://localhost:8000/predict/{ticker}", timeout=30).json()
-            STOCK_CACHE[ticker] = {"data": data, "pred": pred}
-            print(f"✓ Preloaded {ticker}")
-        except Exception as e:
-            print(f"✗ Failed to preload {ticker}: {e}")
-    
-    print(f"✓ Preloaded {len(STOCK_CACHE)} tickers. Table will be populated on startup.")
+    return figure, pred_text, table_data, loading_style
 
 
 if __name__ == "__main__":
-    # Preload default ticker before starting server
-    # This ensures data is ready when callback fires on page load
-    preload_cache()
+    # Backend handles data caching and preloading, so frontend starts immediately
     print("Starting Dash server...")
+    print("Note: Backend handles data caching and periodic updates (12 hours)")
     app.run(debug=True, host="0.0.0.0", port=8050)
